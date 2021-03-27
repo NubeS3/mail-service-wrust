@@ -37,6 +37,11 @@ fn main() {
     Err(_) => panic!("subcribe queue failed"),
   };
 
+  let sender_mail = match env::var("SG_SENDER") {
+    Ok(sender) => sender,
+    Err(_) => panic!("Invalid sender"),
+  };
+
   let sg_key = match env::var("SG_API_KEY") {
     Ok(key) => key,
     Err(_) => panic!("Invalid sendgrid api key"),
@@ -47,6 +52,7 @@ fn main() {
   loop {
     if let Some(msg) = sub.next() {
       let sg1 = sg.clone();
+      let sender = sender_mail.clone();
       task::spawn(async move {
         let msg_info: MsgInfo = match serde_json::from_slice(&msg.data) {
           Ok(i) => i,
@@ -57,7 +63,7 @@ fn main() {
             address: msg_info.to.as_str(),
             name: msg_info.username.as_str(),
           })
-          .add_from("nubes3cloud@gmail.com")
+          .add_from(sender.as_str())
           .add_subject("Verify NubeS3 account")
           .add_from_name("NubeS3 Team")
           .add_content(
