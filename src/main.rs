@@ -1,36 +1,79 @@
-extern crate dotenv;
+use std::env;
 
 use dotenv::dotenv;
-use nats;
-use std::env;
+use sendgrid::{Destination, Mail, SGClient};
+use serde::Deserialize;
+use serde_json;
 use tokio::task;
 
-fn main() -> std::io::Result<()> {
-  dotenv().ok();
-
-  let nats_url = env::var("NATS_URL").ok().unwrap();
-  let nats_sbj = env::var("NATS_SBJ").ok().unwrap();
-  let nats_queue = env::var("NATS_QUEUE").ok().unwrap();
-
-  let nats = nats::connect(&nats_url).ok().unwrap();
-
-  for _ in 0..12 {
-    let nats1 = nats.clone();
-    let nats_sbj1 = nats_sbj.clone();
-    let nats_queue1 = nats_queue.clone();
-    task::spawn(async {
-      handler(nats1, nats_sbj1, nats_queue1).await;
-    });
-  }
-  Ok(())
+#[derive(Deserialize)]
+struct MsgInfo {
+  username: String,
+  to: String,
+  otp: String,
+  exp: String,
 }
 
-async fn handler(nc: nats::Connection, nats_sbj: String, nats_queue: String) {
-  let sub = nc.queue_subscribe(&nats_sbj, &nats_queue).ok().unwrap();
+fn main() {
+  dotenv().ok();
+
+  let nats_endpoint = match env::var("NATS_ENDPOINT") {
+    Ok(endpoint) => endpoint,
+    Err(_) => panic!("endpoint invalid"),
+  };
+
+  let nats = match nats::connect(nats_endpoint.as_str()) {
+    Ok(c) => c,
+    Err(_) => panic!("nats connect failed"),
+  };
+
+  let sbj = match env::var("NATS_SBJ") {
+    Ok(s) => s,
+    Err(_) => panic!("subject invalid"),
+  };
+
+  let sub = match nats.queue_subscribe(&sbj, "q") {
+    Ok(s) => s,
+    Err(_) => panic!("subcribe queue failed"),
+  };
+
+  let sg_key = match env::var("SG_API_KEY") {
+    Ok(key) => key,
+    Err(_) => panic!("Invalid sendgrid api key"),
+  };
+
+  let sg = SGClient::new(sg_key);
+
   loop {
     if let Some(msg) = sub.next() {
-      let msg = String::from_utf8(msg.data.clone()).unwrap();
-      println!("{}", msg);
+      let sg1 = sg.clone();
+      task::spawn(async move {
+        let msg_info: MsgInfo = match serde_json::from_slice(&msg.data) {
+          Ok(i) => i,
+          Err(_) => panic!("parse info from message failed"),
+        };
+        let mail = Mail::new()
+          .add_to(Destination {
+            address: msg_info.to.as_str(),
+            name: msg_info.username.as_str(),
+          })
+          .add_from("nubes3cloud@gmail.com")
+          .add_subject("Verify NubeS3 account")
+          .add_from_name("NubeS3 Team")
+          .add_content(
+            format!(
+              "Do not share this OTP to others./n
+              OTP: {}.\n
+              Expired time: {}",
+              msg_info.otp, msg_info.exp
+            ),
+            "text/html",
+          );
+        match sg1.send(mail) {
+          Ok(resp) => println!("Response: {:?}", resp),
+          Err(e) => println!("Err: {}", e),
+        };
+      });
     }
   }
 }

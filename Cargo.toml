@@ -10,3 +10,6 @@ edition = "2018"
 dotenv = "0.15.0"
 nats = "0.9.8"
 tokio = { version = "1.4.0", features = ["full"] }
+sendgrid = "0.17.0"
+serde = "1.0.125"
+serde_json = "1.0.64"
